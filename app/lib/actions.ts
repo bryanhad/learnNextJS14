@@ -6,10 +6,10 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 const FormSchema = z.object({
-  id: z.string({
+  id: z.string(),
+  customerId: z.string({
     invalid_type_error: 'Please select a customer.',
   }),
-  customerId: z.string(),
   amount: z.coerce
     .number()
     .gt(0, { message: 'Please enter an amount greater than $0.' }),
@@ -70,15 +70,29 @@ export async function createInvoice(prevState: State, formData: FormData) {
   redirect('/dashboard/invoices');
 }
 
-export async function updateInvoice(id: string, formData: FormData) {
-  const { customerId, amount, status } = UpdateInvoice.parse({
+export async function updateInvoice(id: string, prevState: State, formData: FormData) {
+  // I put the prevState param at the second param, becasue the first param 'id' is predefined when we make the updateInvoiceWithId! with .bind() method ofcourse. so the first argument is already booked by the id! eventhough prevState is a requiredProp from using useFormState. found this out by myself hehe. :)
+
+  // validate fields using Zod
+  const validatedFields = UpdateInvoice.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
   });
 
+  // if validation failed, return the error early, if success, continue!
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Edit Invoice.',
+    }
+  }
+
+  // prepare the data that will be inserted into db
+  const { customerId, amount, status } = validatedFields.data
   const amountInCents = amount * 100;
 
+  // insert data to db
   try {
     await sql`
       UPDATE invoices
@@ -86,8 +100,11 @@ export async function updateInvoice(id: string, formData: FormData) {
       WHERE id = ${id}
     `;
   } catch (err) {
+    // if db error occur, return specific error message
     return { message: 'Database Error: Failed to Update Invoice.' };
   }
+
+  // revaldiate thecache for invoices page, then redirect the user!
   revalidatePath('dashboard/invoices');
   redirect('/dashboard/invoices');
 }
